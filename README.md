@@ -112,7 +112,7 @@ Please create an **Issue** or submit a **Pull Request** if you would like to con
 If this repository helps you, consider leaving a ⭐ on GitHub.
 
 Your support helps improve existing projects and future releases.
-
+Discord - https://discord.gg/ztHkcSzVvd
 ---
 
 <div align="center">
