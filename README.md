@@ -1,5 +1,3 @@
-# 🚀 ROOTSUNNYLAB CDN
-
 <div align="center">
 
 # 🌍 ROOTSUNNYLAB CDN
