@@ -24,7 +24,7 @@ info(){ printf '  %s•%s %s\n' "$CYAN" "$RESET" "$*"; }
 ok(){ printf '%s✓%s %s\n' "$GREEN" "$RESET" "$*"; log "OK: $*"; }
 warn(){ printf '%s!%s %s\n' "$YELLOW" "$RESET" "$*"; log "WARN: $*"; }
 die(){ printf '%s✕ ERROR:%s %s\n' "$RED" "$RESET" "$*" >&2; log "ERROR: $*"; exit 1; }
-ask(){ local a < /dev/tty; read -r -p "$1 [y/N] " a; [[ $a =~ ^[Yy]$ ]]; }
+ask(){ local a < /dev/tty; read -r -p "$1 [y/N] " a < /dev/tty; [[ $a =~ ^[Yy]$ ]]; }
 run(){ local label=$1; shift; printf '  %s…%s %s\n' "$DIM" "$RESET" "$label"; log "RUN: $label"; "$@" >>"$LOG_FILE" 2>&1 || die "$label failed. See $LOG_FILE"; ok "$label"; }
 
 root mkdir -p "$(dirname "$LOG_FILE")" "$BACKUP_ROOT" 2>/dev/null || true
@@ -116,7 +116,7 @@ ROOTSUNNYLAB • UPDATE BLUEPRINT
   3  Latest commit of a fork      (organization/repository)
   0  Back
 EOF
-  read -r -p 'Select [0-3]: ' c < /dev/tty
+  read -r -p 'Select [0-3]: ' c < /dev/tty < /dev/tty
   case $c in
     1) run "Update Blueprint stable release" blueprint -upgrade;;
     2) warn "Development commits may break and are unsupported."; ask "Continue?" && run "Update Blueprint development commit" blueprint -upgrade remote;;
@@ -197,7 +197,7 @@ uninstall(){
   warn "Database is external to the web directory; keep a database backup too."
   ask "Create backup and continue?" || return
   backup
-  printf '\n%sType UNINSTALL to continue:%s ' "$RED" "$RESET"; read -r phrase; [[ $phrase == UNINSTALL ]] || { warn "Cancelled."; return; }
+  printf '\n%sType UNINSTALL to continue:%s ' "$RED" "$RESET"; read -r phrase < /dev/tty; [[ $phrase == UNINSTALL ]] || { warn "Cancelled."; return; }
   restore_panel
   ok "Blueprint removed and Pterodactyl restored in $PTERODACTYL_DIRECTORY"
 }
@@ -237,7 +237,7 @@ menu(){ while true; do banner; cat <<'EOF'
 │                                                          │
 ╰──────────────────────────────────────────────────────────╯
 EOF
-read -r -p 'Select an option [0-11]: ' c < /dev/tty; case $c in 1) install;; 2) update;; 3) update_panel_blueprint;; 4) reinstall;; 5) repair;; 6) doctor;; 7) config;; 8) uninstall;; 9) preflight; backup;; 10) dryrun;; 11) tail -n 100 "$LOG_FILE" 2>/dev/null || true;; 0) exit 0;; *) warn 'Invalid selection.';; esac; echo; read -r -p 'Press Enter to continue...' _; done; }
+read -r -p 'Select an option [0-11]: ' c < /dev/tty; case $c in 1) install;; 2) update;; 3) update_panel_blueprint;; 4) reinstall;; 5) repair;; 6) doctor;; 7) config;; 8) uninstall;; 9) preflight; backup;; 10) dryrun;; 11) tail -n 100 "$LOG_FILE" 2>/dev/null || true;; 0) exit 0;; *) warn 'Invalid selection.';; esac; echo; read -r -p 'Press Enter to continue...' _ < /dev/tty; done; }
 
 case ${1:-} in
   --install) install;; --update) update;; --update-panel-blueprint) update_panel_blueprint;; --reinstall) reinstall;; --repair) repair;; --doctor) doctor;; --config) config;; --uninstall) uninstall;; --backup) preflight; backup;; --dry-run) dryrun;; --version) echo "$VERSION";; --help|-h) echo "ROOTSUNNYLAB Blueprint Installer $VERSION"; echo "Usage: $0 [--install|--update|--update-panel-blueprint|--reinstall|--repair|--doctor|--config|--uninstall|--backup|--dry-run]";; *) menu;; esac
