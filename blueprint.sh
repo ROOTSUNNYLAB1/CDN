@@ -5,7 +5,7 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-VERSION="3.0.0"
+VERSION="3.1.0"
 PTERODACTYL_DIRECTORY="${PTERODACTYL_DIRECTORY:-/var/www/pterodactyl}"
 BLUEPRINT_RELEASE_URL="https://github.com/BlueprintFramework/framework/releases/latest/download/release.zip"
 PTERODACTYL_RELEASE_URL="https://github.com/pterodactyl/panel/releases/latest/download/panel.tar.gz"
@@ -37,7 +37,7 @@ banner(){ clear 2>/dev/null || true; cat <<'EOF'
 ██████╔╝██║   ██║██║   ██║   ██║   ███████╗██║   ██║██╔██╗ ██║███████║ ╚████╔╝
 ██╔══██╗██║   ██║██║   ██║   ██║   ╚════██║██║   ██║██║╚██╗██║██╔══██║  ╚██╔╝
 ██║  ██║╚██████╔╝╚██████╔╝   ██║   ███████║╚██████╔╝██║ ╚████║██║  ██║   ██║
-╚═╝  ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝ ╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝
+╚═╝  ╚═╝ ╚═════╝  ╚═════╝    ╚═╝   ╚══════╝╚═════╝ ╚═╝  ╚═══╝╚═╝  ╚═╝   ╚═╝
 
                  P T E R O D A C T Y L   B L U E P R I N T
                   ROOTSUNNYLAB • BLUEPRINT INSTALLER
@@ -134,6 +134,40 @@ backup(){
   printf '%sBackup: %s%s\n' "$GREEN" "$dir" "$RESET"
 }
 
+update_panel_blueprint(){
+  preflight
+  cd "$PTERODACTYL_DIRECTORY"
+  [[ -f .env ]] || die ".env is missing; refusing to update without preserving APP_KEY."
+  exists php || die "PHP is required."
+  exists composer || die "Composer is required."
+  exists curl || die "curl is required."
+  if ! exists blueprint; then [[ -x blueprint.sh ]] || die "Blueprint is not installed."; fi
+
+  warn "This updates BOTH Pterodactyl and Blueprint. Your .env / APP_KEY will be preserved."
+  warn "A complete web-directory backup is strongly recommended before continuing."
+  ask "Create a backup before updating?" && backup
+  ask "Continue with Pterodactyl + Blueprint update?" || return
+
+  local work archive env
+  work=$(mktemp -d)
+  archive="$work/panel.tar.gz"
+  env="$work/.env"
+  cp -a "$PTERODACTYL_DIRECTORY/.env" "$env"
+  trap 'rm -rf "$work"' RETURN
+
+  run "Enter Pterodactyl maintenance mode" php artisan down
+  run "Download latest Pterodactyl release" curl -fL --retry 3 "$PTERODACTYL_RELEASE_URL" -o "$archive"
+  [[ -s "$archive" ]] || die "Pterodactyl archive is empty."
+  run "Extract latest Pterodactyl release" tar -xzvf "$archive" -C "$PTERODACTYL_DIRECTORY"
+  run "Restore original .env / APP_KEY" cp -a "$env" "$PTERODACTYL_DIRECTORY/.env"
+  run "Set storage and cache permissions" bash -c "cd '$PTERODACTYL_DIRECTORY' && chmod -R 755 storage/* bootstrap/cache"
+  run "Install Pterodactyl dependencies" bash -c "cd '$PTERODACTYL_DIRECTORY' && COMPOSER_ALLOW_SUPERUSER=1 composer install --no-dev --optimize-autoloader"
+  run "Update Pterodactyl database schema" php artisan migrate --seed --force
+  run "Update Blueprint and restore Blueprint changes" blueprint -upgrade
+  run "Exit Pterodactyl maintenance mode" php artisan up
+  ok "Pterodactyl + Blueprint update completed successfully"
+}
+
 restore_panel(){
   local work env archive owner=www-data:www-data; work=$(mktemp -d); env="$work/.env"; archive="$work/panel.tar.gz"
   [[ -f "$PTERODACTYL_DIRECTORY/.env" ]] || die ".env is missing; APP_KEY cannot be safely preserved."
@@ -169,18 +203,15 @@ uninstall(){
 }
 
 reinstall(){ preflight; warn "Blueprint reinstall does not intentionally delete .env or the panel database."; ask "Continue?" || return; install; }
-
 repair(){ preflight; packages; node_setup; configure; cd "$PTERODACTYL_DIRECTORY"; run "Install/repair Yarn dependencies" yarn install; [[ ! -f blueprint.sh ]] || run "Fix blueprint.sh permission" root chmod +x blueprint.sh; ok "Repair complete"; }
-
 doctor(){ preflight; printf '\nPHP: '; exists php && php -v | head -1 || echo missing; printf 'Composer: '; exists composer && composer --version | head -1 || echo missing; printf 'Node: '; exists node && node -v || echo missing; printf 'npm: '; exists npm && npm -v || echo missing; printf 'Yarn: '; exists yarn && yarn -v || echo missing; printf 'Blueprint: '; exists blueprint && echo available || echo missing; [[ -f "$PTERODACTYL_DIRECTORY/.env" ]] && ok '.env present' || warn '.env missing'; [[ -f "$PTERODACTYL_DIRECTORY/.blueprintrc" ]] && ok '.blueprintrc present' || warn '.blueprintrc missing'; }
-
 config(){ preflight; printf '\nPterodactyl directory : %s\nBlueprint release URL : %s\nBackup directory      : %s\nLog file              : %s\n' "$PTERODACTYL_DIRECTORY" "$BLUEPRINT_RELEASE_URL" "$BACKUP_ROOT" "$LOG_FILE"; [[ -f "$PTERODACTYL_DIRECTORY/.blueprintrc" ]] && { echo; cat "$PTERODACTYL_DIRECTORY/.blueprintrc"; }; }
-
 dryrun(){ preflight; cat <<EOF
 
 DRY RUN — no changes will be made.
 Install: dependencies → Node.js 22 → Blueprint release → .blueprintrc → yarn install.
 Update Blueprint: blueprint -upgrade / remote / custom fork only.
+Update Pterodactyl + Blueprint: maintenance mode → latest panel → permissions → composer → database → blueprint -upgrade → production.
 Uninstall: full web backup → separate .env → maintenance mode → replace panel files → restore .env → composer → caches → migrations → ownership → queue restart → panel up.
 Backup: $BACKUP_ROOT
 EOF
@@ -193,19 +224,20 @@ menu(){ while true; do banner; cat <<'EOF'
 │                                                          │
 │  1  Install Blueprint                                    │
 │  2  Update Blueprint                                     │
-│  3  Reinstall Blueprint                                  │
-│  4  Repair Installation                                  │
-│  5  Check System / Doctor                                │
-│  6  Show Configuration                                   │
-│  7  Uninstall Blueprint + Restore Pterodactyl            │
-│  8  Full Backup                                          │
-│  9  Dry Run / Preview                                    │
-│ 10  View Installer Log                                   │
+│  3  Update Pterodactyl + Blueprint                       │
+│  4  Reinstall Blueprint                                  │
+│  5  Repair Installation                                  │
+│  6  Check System / Doctor                                │
+│  7  Show Configuration                                   │
+│  8  Uninstall Blueprint + Restore Pterodactyl            │
+│  9  Full Backup                                          │
+│ 10  Dry Run / Preview                                    │
+│ 11  View Installer Log                                   │
 │  0  Exit                                                 │
 │                                                          │
 ╰──────────────────────────────────────────────────────────╯
 EOF
-read -r -p 'Select an option [0-10]: ' c; case $c in 1) install;; 2) update;; 3) reinstall;; 4) repair;; 5) doctor;; 6) config;; 7) uninstall;; 8) preflight; backup;; 9) dryrun;; 10) tail -n 100 "$LOG_FILE" 2>/dev/null || true;; 0) exit 0;; *) warn 'Invalid selection.';; esac; echo; read -r -p 'Press Enter to continue...' _; done; }
+read -r -p 'Select an option [0-11]: ' c; case $c in 1) install;; 2) update;; 3) update_panel_blueprint;; 4) reinstall;; 5) repair;; 6) doctor;; 7) config;; 8) uninstall;; 9) preflight; backup;; 10) dryrun;; 11) tail -n 100 "$LOG_FILE" 2>/dev/null || true;; 0) exit 0;; *) warn 'Invalid selection.';; esac; echo; read -r -p 'Press Enter to continue...' _; done; }
 
 case ${1:-} in
-  --install) install;; --update) update;; --reinstall) reinstall;; --repair) repair;; --doctor) doctor;; --config) config;; --uninstall) uninstall;; --backup) preflight; backup;; --dry-run) dryrun;; --version) echo "$VERSION";; --help|-h) echo "ROOTSUNNYLAB Blueprint Installer $VERSION"; echo "Usage: $0 [--install|--update|--reinstall|--repair|--doctor|--config|--uninstall|--backup|--dry-run]";; *) menu;; esac
+  --install) install;; --update) update;; --update-panel-blueprint) update_panel_blueprint;; --reinstall) reinstall;; --repair) repair;; --doctor) doctor;; --config) config;; --uninstall) uninstall;; --backup) preflight; backup;; --dry-run) dryrun;; --version) echo "$VERSION";; --help|-h) echo "ROOTSUNNYLAB Blueprint Installer $VERSION"; echo "Usage: $0 [--install|--update|--update-panel-blueprint|--reinstall|--repair|--doctor|--config|--uninstall|--backup|--dry-run]";; *) menu;; esac
